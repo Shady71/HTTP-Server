@@ -33,12 +33,36 @@ function parseRequest(data) {
     return { method, path, query, headers, body, version };
 }
 
+function sendResponse(socket, statusCode, headers, body) {
+    const statusMessage = {
+        200: 'OK',
+        201: 'Created',
+        400: 'Bad Request',
+        404: 'Not Found',
+        500: 'Internal Server Error'
+    }[statusCode] || 'Unknown';
+
+    headers['Content-Length'] = Buffer.byteLength(body);
+    headers['Connection'] = 'close';
+
+    const responseLines = [
+        `HTTP/1.1 ${statusCode} ${statusMessage}`,
+        ...Object.entries(headers).map(([key, value]) => `${key}: ${value}`),
+        '',
+        body
+    ];
+
+    socket.write(responseLines.join('\r\n'));
+    socket.end();
+}
+
 const server = net.createServer((socket) => {
     console.log('A client connected.');
 
     socket.on('data', (data) => {
         const request = parseRequest(data);
-        console.log(request);
+        console.log(`${request.method} ${request.path}`);
+        sendResponse(socket, 200, { 'Content-Type': 'text/plain' }, 'Hello, World!');
     });
 
     socket.on('end', () => {
