@@ -56,13 +56,52 @@ function sendResponse(socket, statusCode, headers, body) {
     socket.end();
 }
 
+function createRouter() {
+    const routes = {};
+
+    function addRoute(method, path, handler) {
+        if (!routes[method]) {
+            routes[method] = {};
+        }
+        routes[method][path] = handler;
+    }
+
+    function getHandler(method, path) {
+        const methodRoutes = routes[method];
+
+        for (const pattern in methodRoutes) {
+            const patternParts = pattern.split('/');
+            const pathParts = path.split('/');
+
+            if (patternParts.length !== pathParts.length) continue;
+
+            const params = {};
+            let isMatch = true;
+
+            for (let i = 0; i < patternParts.length; i++) {
+                if (patternParts[i].startsWith(':')) {
+                    const name = patternParts[i].slice(1);
+                    params[name] = pathParts[i];
+                } else if (patternParts[i] !== pathParts[i]) {
+                    isMatch = false;
+                    break;
+                }
+            }
+            if (isMatch) {
+                return { handler: methodRoutes[pattern], params };
+            }
+        }
+        return null;
+    }
+    return { addRoute, getHandler };
+}
+
 const server = net.createServer((socket) => {
     console.log('A client connected.');
 
     socket.on('data', (data) => {
         const request = parseRequest(data);
         console.log(`${request.method} ${request.path}`);
-        sendResponse(socket, 200, { 'Content-Type': 'text/plain' }, 'Hello, World!');
     });
 
     socket.on('end', () => {
