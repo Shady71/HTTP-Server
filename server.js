@@ -1,4 +1,17 @@
 const net = require('net');
+const fs = require('fs');
+const path = require('path');
+
+const MIME_TYPES = {
+    '.html': 'text/html',
+    '.css': 'text/css',
+    '.js': 'application/javascript',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+};
 
 function parseRequest(data) {
     const text = data.toString();
@@ -52,9 +65,32 @@ function sendResponse(socket, statusCode, headers, body) {
         body
     ];
 
-    socket.write(responseLines.join('\r\n'));
+    const head = responseLines.slice(0,-1).join('\r\n') + '\r\n';
+    socket.write(head);
+    socket.write(body);
     socket.end();
 }
+
+function serveFile(socket, filePath) {
+    const publicDir = path.resolve('public');
+    const resolvedPath = path.resolve(filePath);
+
+    if (!resolvedPath.startsWith(publicDir)) {
+        sendResponse(socket, 400, { 'Content-Type': 'text/plain' }, 'Invalid file path');
+        return;
+    }
+
+    const ext = path.extname(resolvedPath).toLowerCase();
+    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+
+    fs.readFile(resolvedPath, (err, data) => {
+        if (err) {
+            sendResponse(socket, 404, { 'Content-Type': 'text/plain' }, 'File Not Found');
+        } else {
+            sendResponse(socket, 200, { 'Content-Type': contentType }, data);
+        }
+    });
+}  
 
 function createRouter() {
     const routes = {};
@@ -105,7 +141,9 @@ function createApp() {
         if (typeof result === 'string') {
             sendResponse(socket, 200, { 'Content-Type': 'text/plain' }, result);
         } else if (result && typeof result === 'object') {
-            if (result._status || result._type) {
+            if (result._file) {
+                serveFile(socket, result._file);
+            } else if (result._status || result._type) {
                 const status = result._status || 200;
                 if (result._type === 'text') {
                     sendResponse(socket, status, { 'Content-Type': 'text/plain' }, result.body);
@@ -127,6 +165,13 @@ function createApp() {
             return;
         }
         request.params = matched.params;
+        if (request.headers['content-type'] === 'application/json' && request.body) {
+            try {
+                request.body = JSON.parse(request.body);
+            } catch (e) {
+
+            }
+        }
         const result = matched.handler(request);
         interpret(socket, result);
     }
@@ -137,9 +182,11 @@ function createApp() {
         listen: (port, callback) => {
             const server = net.createServer((socket) => {
                 socket.on('data', (data) => {
-                    const req = parseRequest(data);
-                    console.log(`${req.method} ${req.path}`);
-                    handleRequest(req, socket);
+                    const start = Date.now();
+                    const request = parseRequest(data);
+                    handleRequest(request, socket);
+                    const ms = Date.now() - start;
+                    console.log(`${request.method} ${request.path} (${ms}ms)`);
                 });
                 socket.on('error', (err) => console.error('Socket error:', err.message));
             });
@@ -159,6 +206,10 @@ app.post('/users', (request) => ({
     _status: 201,
     body: { created: true, received: request.body }
 }));
+
+app.get('/home', () => ({ _file: 'public/test.html' }));
+
+app.get('/static/:filename', (request) => ({ _file: 'public/' + request.params.filename }));
 
 app.listen(3000, () => {
     console.log('Server listening on port 3000');
