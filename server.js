@@ -30,7 +30,7 @@ function parseRequest(data) {
 
     const body = lines.slice(i + 1).join('\r\n');
 
-    return { method, path, query, headers, body, version };
+    return {method, path, query, headers, body, version};
 }
 
 function sendResponse(socket, statusCode, headers, body) {
@@ -69,6 +69,8 @@ function createRouter() {
     function getHandler(method, path) {
         const methodRoutes = routes[method];
 
+        if (!methodRoutes) return null;
+        
         for (const pattern in methodRoutes) {
             const patternParts = pattern.split('/');
             const pathParts = path.split('/');
@@ -93,22 +95,71 @@ function createRouter() {
         }
         return null;
     }
-    return { addRoute, getHandler };
+    return {addRoute, getHandler};
 }
 
-const server = net.createServer((socket) => {
-    console.log('A client connected.');
+function createApp() {
+    const router = createRouter();
 
-    socket.on('data', (data) => {
-        const request = parseRequest(data);
-        console.log(`${request.method} ${request.path}`);
-    });
+    function interpret(socket, result) {
+        if (typeof result === 'string') {
+            sendResponse(socket, 200, { 'Content-Type': 'text/plain' }, result);
+        } else if (result && typeof result === 'object') {
+            if (result._status || result._type) {
+                const status = result._status || 200;
+                if (result._type === 'text') {
+                    sendResponse(socket, status, { 'Content-Type': 'text/plain' }, result.body);
+                } else {
+                    sendResponse(socket, status, { 'Content-Type': 'application/json' }, JSON.stringify(result.body));
+                }
+            } else {
+                sendResponse(socket, 200, { 'Content-Type': 'application/json' }, JSON.stringify(result));
+            }
+        } else {
+            sendResponse(socket, 500, { 'Content-Type': 'text/plain' }, 'Handler returned nothing');
+        }
+    }
 
-    socket.on('end', () => {
-        console.log('client disconnected.');
-    });
-});
+    function handleRequest(request, socket) {
+        const matched = router.getHandler(request.method, request.path);
+        if (!matched) {
+            sendResponse(socket, 404, { 'Content-Type': 'text/plain' }, 'Not Found');
+            return;
+        }
+        request.params = matched.params;
+        const result = matched.handler(request);
+        interpret(socket, result);
+    }
 
-server.listen(3000, () => {
+    const app = {
+        get: (path, handler) => router.addRoute('GET', path, handler),
+        post: (path, handler) => router.addRoute('POST', path, handler),
+        listen: (port, callback) => {
+            const server = net.createServer((socket) => {
+                socket.on('data', (data) => {
+                    const req = parseRequest(data);
+                    console.log(`${req.method} ${req.path}`);
+                    handleRequest(req, socket);
+                });
+                socket.on('error', (err) => console.error('Socket error:', err.message));
+            });
+            server.listen(port, callback);
+        }
+    };
+    return app;
+}
+
+const app = createApp();
+
+app.get('/', () => 'Server is running.');
+
+app.get('/users/:id', (request) => ({ id: request.params.id, name: 'User ' + request.params.id }));
+
+app.post('/users', (request) => ({
+    _status: 201,
+    body: { created: true, received: request.body }
+}));
+
+app.listen(3000, () => {
     console.log('Server listening on port 3000');
 });
