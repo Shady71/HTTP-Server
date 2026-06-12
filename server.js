@@ -35,7 +35,7 @@ function parseRequest(data) {
     for (; i < lines.length; i++) {
         const line = lines[i];
         if (line === '') break; // End of headers
-        const colon = line.indexOf(':');
+        const colon = line.indexOf(':'); // first colon only - values like "localhost:3000"
         const key = line.slice(0, colon).toLowerCase().trim();
         const value = line.slice(colon + 1).trim();
         headers[key] = value;
@@ -75,6 +75,7 @@ function serveFile(socket, filePath) {
     const publicDir = path.resolve('public');
     const resolvedPath = path.resolve(filePath);
 
+    // block directory traversal
     if (!resolvedPath.startsWith(publicDir)) {
         sendResponse(socket, 400, { 'Content-Type': 'text/plain' }, 'Invalid file path');
         return;
@@ -90,7 +91,7 @@ function serveFile(socket, filePath) {
             sendResponse(socket, 200, { 'Content-Type': contentType }, data);
         }
     });
-}  
+}
 
 function createRouter() {
     const routes = {};
@@ -140,7 +141,7 @@ function createApp() {
     function interpret(socket, result) {
         if (typeof result === 'string') {
             sendResponse(socket, 200, { 'Content-Type': 'text/plain' }, result);
-        } else if (result && typeof result === 'object') {
+        } else if (result && typeof result === 'object') { // result && filters null
             if (result._file) {
                 serveFile(socket, result._file);
             } else if (result._status || result._type) {
@@ -169,7 +170,7 @@ function createApp() {
             try {
                 request.body = JSON.parse(request.body);
             } catch (e) {
-
+                // Invalid JSON - keep the raw string.
             }
         }
         const result = matched.handler(request);
@@ -200,16 +201,16 @@ const app = createApp();
 
 app.get('/', () => 'Server is running.');
 
-app.get('/users/:id', (request) => ({ id: request.params.id, name: 'User ' + request.params.id }));
+app.get('/users/:id', (request) => ({id: request.params.id, name: 'User ' + request.params.id}));
 
 app.post('/users', (request) => ({
     _status: 201,
-    body: { created: true, received: request.body }
+    body: {created: true, received: request.body}
 }));
 
 app.get('/home', () => ({ _file: 'public/test.html' }));
 
-app.get('/static/:filename', (request) => ({ _file: 'public/' + request.params.filename }));
+app.get('/static/:filename', (request) => ({_file: 'public/' + request.params.filename}));
 
 app.listen(3000, () => {
     console.log('Server listening on port 3000');
